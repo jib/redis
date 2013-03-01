@@ -67,7 +67,9 @@
 #define REDIS_ERR               -1
 
 /* Static server configuration */
-#define REDIS_HZ                100     /* Time interrupt calls/sec. */
+#define REDIS_DEFAULT_HZ        10      /* Time interrupt calls/sec. */
+#define REDIS_MIN_HZ            1
+#define REDIS_MAX_HZ            500
 #define REDIS_SERVERPORT        6379    /* TCP port */
 #define REDIS_MAXIDLETIME       0       /* default client timeout: infinite */
 #define REDIS_DEFAULT_DBNUM     16
@@ -665,6 +667,13 @@ struct redisServer {
     int assert_line;
     int bug_report_start; /* True if bug report header was already logged. */
     int watchdog_period;  /* Software watchdog period in ms. 0 = off */
+    /* Statsd statistics */
+    int statsd_enabled;     /* send to statsd? */
+    char *statsd_host;      /* statsd host */
+    int statsd_port;        /* statsd port */
+    char *statsd_prefix;    /* prefix any key with this */
+    char *statsd_suffix;    /* suffix any key with this */
+    int statsd_socket;      /* open socket to the statsd daemon */
 };
 
 typedef struct pubsubPattern {

@@ -400,6 +400,26 @@ void loadServerConfigFromString(char *config) {
                 err = sentinelHandleConfiguration(argv+1,argc-1);
                 if (err) goto loaderr;
             }
+
+        /* Statsd section */
+        } else if (!strcasecmp(argv[0],"statsd-enabled") && argc == 2) {
+            if ((server.statsd_enabled = yesnotoi(argv[1])) == -1) {
+                err = "argument must be 'yes' or 'no'"; goto loaderr;
+            }
+        } else if (!strcasecmp(argv[0],"statsd-host") && argc == 3) {
+            if (server.statsd_host) zfree(server.statsd_host);
+
+            server.statsd_host = zstrdup(argv[1]);
+            server.statsd_port = atoi(argv[2]);
+
+        } else if (!strcasecmp(argv[0],"statsd-prefix") && argc == 2) {
+            if (server.statsd_prefix) zfree(server.statsd_prefix);
+            server.statsd_prefix = zstrdup(argv[1]);
+
+        } else if (!strcasecmp(argv[0],"statsd-suffix") && argc == 2) {
+            if (server.statsd_suffix) zfree(server.statsd_suffix);
+            server.statsd_suffix = zstrdup(argv[1]);
+
         } else {
             err = "Bad directive or wrong number of arguments"; goto loaderr;
         }
@@ -719,6 +739,49 @@ void configSetCommand(redisClient *c) {
         if (getLongLongFromObject(o,&ll) == REDIS_ERR ||
             ll <= 0) goto badfmt;
         server.slave_priority = ll;
+
+    /* Statsd section */
+    } else if (!strcasecmp(c->argv[2]->ptr,"statsd-enabled")) {
+        int yn = yesnotoi(o->ptr);
+
+        if (yn == -1) goto badfmt;
+        server.statsd_enabled = yn;
+
+    } else if (!strcasecmp(c->argv[2]->ptr,"statsd-host")) {
+        /* This will come in as "foo.bar.com 1234", so we need to split
+           the string on whitespace. Use the built-in sds lib for that
+        */
+        int vlen;
+        sds *v = sdssplitlen(o->ptr,sdslen(o->ptr)," ",1,&vlen);
+
+        // 1 or 2 elements needed
+        if (vlen <= 0 || vlen > 2 ) goto badfmt;
+
+        /* get the port - optional */
+        if (v[1]) {
+            int port = atoi(v[1]);
+            if (port < 0) goto badfmt;
+            server.statsd_port = port;
+        }
+
+        /* get the host */
+        zfree(server.statsd_host);
+        server.statsd_host = zstrdup(v[0]);
+
+        /* get rid of the socket */
+        server.statsd_socket = 0;
+
+        fprintf( stderr, "statsd-host: %s\n", (char *)o->ptr );
+
+
+    } else if (!strcasecmp(c->argv[2]->ptr,"statsd-prefix")) {
+        zfree(server.statsd_prefix);
+        server.statsd_prefix = zstrdup(o->ptr);
+
+    } else if (!strcasecmp(c->argv[2]->ptr,"statsd-suffix")) {
+        zfree(server.statsd_suffix);
+        server.statsd_suffix = zstrdup(o->ptr);
+
     } else {
         addReplyErrorFormat(c,"Unsupported CONFIG parameter: %s",
             (char*)c->argv[2]->ptr);
@@ -773,7 +836,9 @@ void configGetCommand(redisClient *c) {
     config_get_string_field("bind",server.bindaddr);
     config_get_string_field("unixsocket",server.unixsocket);
     config_get_string_field("logfile",server.logfile);
-    config_get_string_field("pidfile",server.pidfile);
+    config_get_string_field("statsd-prefix",server.statsd_prefix);
+    config_get_string_field("statsd-suffix",server.statsd_suffix);
+
 
     /* Numerical values */
     config_get_numerical_field("maxmemory",server.maxmemory);
@@ -826,6 +891,7 @@ void configGetCommand(redisClient *c) {
     config_get_bool_field("activerehashing", server.activerehashing);
     config_get_bool_field("repl-disable-tcp-nodelay",
             server.repl_disable_tcp_nodelay);
+    config_get_bool_field("statsd-enabled", server.statsd_enabled);
 
     /* Everything we can't handle with macros follows. */
 
@@ -940,6 +1006,29 @@ void configGetCommand(redisClient *c) {
         addReplyBulkCString(c,buf);
         matches++;
     }
+
+    if (stringmatch(pattern,"statsd-host",0)) {
+        char buf[256];
+
+        addReplyBulkCString(c,"statsd-host");
+        if (server.statsd_host)
+            snprintf(buf,sizeof(buf),"%s %d",
+                server.statsd_host, server.statsd_port);
+        else
+            buf[0] = '\0';
+        addReplyBulkCString(c,buf);
+        matches++;
+    }
+    if (stringmatch(pattern,"notify-keyspace-events",0)) {
+        robj *flagsobj = createObject(REDIS_STRING,
+            keyspaceEventsFlagsToString(server.notify_keyspace_events));
+
+        addReplyBulkCString(c,"notify-keyspace-events");
+        addReplyBulk(c,flagsobj);
+        decrRefCount(flagsobj);
+        matches++;
+    }
+
     setDeferredMultiBulkLength(c,replylen,matches*2);
 }
 
