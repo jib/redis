@@ -758,7 +758,7 @@ void configSetCommand(redisClient *c) {
         if (vlen <= 0 || vlen > 2 ) goto badfmt;
 
         /* get the port - optional */
-        if (v[1]) {
+        if (vlen==2) {
             int port = atoi(v[1]);
             if (port < 0) goto badfmt;
             server.statsd_port = port;
