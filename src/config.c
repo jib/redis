@@ -754,7 +754,7 @@ void configSetCommand(redisClient *c) {
         int vlen;
         sds *v = sdssplitlen(o->ptr,sdslen(o->ptr)," ",1,&vlen);
 
-        // 1 or 2 elements needed
+        // 1 or 2 elements needed - port is optional
         if (vlen <= 0 || vlen > 2 ) goto badfmt;
 
         /* get the port - optional */
@@ -770,9 +770,6 @@ void configSetCommand(redisClient *c) {
 
         /* get rid of the socket */
         server.statsd_socket = 0;
-
-        fprintf( stderr, "statsd-host: %s\n", (char *)o->ptr );
-
 
     } else if (!strcasecmp(c->argv[2]->ptr,"statsd-prefix")) {
         zfree(server.statsd_prefix);
