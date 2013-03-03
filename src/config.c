@@ -30,6 +30,7 @@
 
 
 #include "redis.h"
+#include "statsd.h"
 
 /*-----------------------------------------------------------------------------
  * Config file parsing
@@ -768,8 +769,8 @@ void configSetCommand(redisClient *c) {
         zfree(server.statsd_host);
         server.statsd_host = zstrdup(v[0]);
 
-        /* get rid of the socket */
-        server.statsd_socket = 0;
+        /* set up the socket again */
+        statsdInit();
 
     } else if (!strcasecmp(c->argv[2]->ptr,"statsd-prefix")) {
         zfree(server.statsd_prefix);
