@@ -748,6 +748,9 @@ void configSetCommand(redisClient *c) {
         if (yn == -1) goto badfmt;
         server.statsd_enabled = yn;
 
+        // Do we have a Statsd socket to write to? If not, do so now
+        if (yn == 1 && server.statsd_socket < 1) statsdInit();
+
     } else if (!strcasecmp(c->argv[2]->ptr,"statsd-host")) {
         /* This will come in as "foo.bar.com 1234", so we need to split
            the string on whitespace. Use the built-in sds lib for that
