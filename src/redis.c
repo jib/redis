@@ -30,6 +30,7 @@
 #include "redis.h"
 #include "slowlog.h"
 #include "bio.h"
+#include "statsd.h"
 
 #include <time.h>
 #include <signal.h>
@@ -1365,6 +1366,9 @@ void initServer() {
         server.maxmemory_policy = REDIS_MAXMEMORY_NO_EVICTION;
     }
 
+    // Connect to statsd?
+    if (server.statsd_enabled) statsdInit();
+
     scriptingInit();
     slowlogInit();
     bioInit();
@@ -1529,17 +1533,7 @@ void call(redisClient *c, int flags) {
     }
 
     /* Send statistics to Statsd if configured */
-    if (server.statsd_enabled) {
-        // fprintf(stderr, "calls: %lld\nargv: %s, argc: %d\n",
-//                     c->cmd->calls, (char*)c->argv[0]->ptr, c->argc);
-//
-//         int j;
-//         for ( j = 0; j < c->argc; j++ ) {
-//             fprintf(stderr, "  * %s\n", (char*)c->argv[j]->ptr );
-//         }
-    }
-
-
+    if (server.statsd_enabled) statsdSend( c );
 
     /* Propagate the command into the AOF and replication link */
     if (flags & REDIS_CALL_PROPAGATE) {
