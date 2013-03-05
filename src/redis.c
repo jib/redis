@@ -1533,7 +1533,7 @@ void call(redisClient *c, int flags) {
     }
 
     /* Send statistics to Statsd if configured */
-    if (server.statsd_enabled) statsdSend( c );
+    if (server.statsd_enabled) statsdSend( c, duration );
 
     /* Propagate the command into the AOF and replication link */
     if (flags & REDIS_CALL_PROPAGATE) {
