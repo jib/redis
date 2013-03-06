@@ -1205,12 +1205,18 @@ void initServerConfig() {
     server.watchdog_period = 0;
 
     /* Statsd support */
-    server.statsd_enabled = 0;
-    server.statsd_host = zstrdup("localhost");
-    server.statsd_port = 8125;
-    server.statsd_prefix = zstrdup("");
-    server.statsd_suffix = zstrdup("");
-    server.statsd_socket = 0;
+    struct redisStatsd statsd;
+    statsd.enabled = 0;
+    statsd.host = zstrdup("localhost");
+    statsd.port = 8125;
+    statsd.prefix = zstrdup("");
+    statsd.suffix = zstrdup("");
+    statsd.socket = 0;
+    statsd.buffer = NULL;
+    statsd.cur_buffer_size = NULL;
+    statsd.max_buffer_size = REDIS_MAX_STATSDBUF_LEN;
+    server.statsd = statsd;
+
 }
 
 /* This function will try to raise the max number of open files accordingly to
@@ -1367,7 +1373,7 @@ void initServer() {
     }
 
     // Connect to statsd?
-    if (server.statsd_enabled) statsdInit();
+    if (server.statsd.enabled) statsdInit();
 
     scriptingInit();
     slowlogInit();
@@ -1533,7 +1539,7 @@ void call(redisClient *c, int flags) {
     }
 
     /* Send statistics to Statsd if configured */
-    if (server.statsd_enabled) statsdSend( c, duration );
+    if (server.statsd.enabled) statsdSend(c, duration);
 
     /* Propagate the command into the AOF and replication link */
     if (flags & REDIS_CALL_PROPAGATE) {

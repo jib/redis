@@ -28,6 +28,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "redis.h"
+
 /* Exported API */
 void statsdInit(void);
 int statsdConnect(const char *host, int port);

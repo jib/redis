@@ -404,22 +404,22 @@ void loadServerConfigFromString(char *config) {
 
         /* Statsd section */
         } else if (!strcasecmp(argv[0],"statsd-enabled") && argc == 2) {
-            if ((server.statsd_enabled = yesnotoi(argv[1])) == -1) {
+            if ((server.statsd.enabled = yesnotoi(argv[1])) == -1) {
                 err = "argument must be 'yes' or 'no'"; goto loaderr;
             }
         } else if (!strcasecmp(argv[0],"statsd-host") && argc == 3) {
-            if (server.statsd_host) zfree(server.statsd_host);
+            if (server.statsd.host) zfree(server.statsd.host);
 
-            server.statsd_host = zstrdup(argv[1]);
-            server.statsd_port = atoi(argv[2]);
+            server.statsd.host = zstrdup(argv[1]);
+            server.statsd.port = atoi(argv[2]);
 
         } else if (!strcasecmp(argv[0],"statsd-prefix") && argc == 2) {
-            if (server.statsd_prefix) zfree(server.statsd_prefix);
-            server.statsd_prefix = zstrdup(argv[1]);
+            if (server.statsd.prefix) zfree(server.statsd.prefix);
+            server.statsd.prefix = zstrdup(argv[1]);
 
         } else if (!strcasecmp(argv[0],"statsd-suffix") && argc == 2) {
-            if (server.statsd_suffix) zfree(server.statsd_suffix);
-            server.statsd_suffix = zstrdup(argv[1]);
+            if (server.statsd.suffix) zfree(server.statsd.suffix);
+            server.statsd.suffix = zstrdup(argv[1]);
 
         } else {
             err = "Bad directive or wrong number of arguments"; goto loaderr;
@@ -746,10 +746,10 @@ void configSetCommand(redisClient *c) {
         int yn = yesnotoi(o->ptr);
 
         if (yn == -1) goto badfmt;
-        server.statsd_enabled = yn;
+        server.statsd.enabled = yn;
 
         // Do we have a Statsd socket to write to? If not, do so now
-        if (yn == 1 && server.statsd_socket < 1) statsdInit();
+        if (yn == 1 && server.statsd.socket < 1) statsdInit();
 
     } else if (!strcasecmp(c->argv[2]->ptr,"statsd-host")) {
         /* This will come in as "foo.bar.com 1234", so we need to split
@@ -765,23 +765,23 @@ void configSetCommand(redisClient *c) {
         if (vlen==2) {
             int port = atoi(v[1]);
             if (port < 0) goto badfmt;
-            server.statsd_port = port;
+            server.statsd.port = port;
         }
 
         /* get the host */
-        zfree(server.statsd_host);
-        server.statsd_host = zstrdup(v[0]);
+        zfree(server.statsd.host);
+        server.statsd.host = zstrdup(v[0]);
 
         /* set up the socket again */
         statsdInit();
 
     } else if (!strcasecmp(c->argv[2]->ptr,"statsd-prefix")) {
-        zfree(server.statsd_prefix);
-        server.statsd_prefix = zstrdup(o->ptr);
+        zfree(server.statsd.prefix);
+        server.statsd.prefix = zstrdup(o->ptr);
 
     } else if (!strcasecmp(c->argv[2]->ptr,"statsd-suffix")) {
-        zfree(server.statsd_suffix);
-        server.statsd_suffix = zstrdup(o->ptr);
+        zfree(server.statsd.suffix);
+        server.statsd.suffix = zstrdup(o->ptr);
 
     } else {
         addReplyErrorFormat(c,"Unsupported CONFIG parameter: %s",
@@ -837,8 +837,8 @@ void configGetCommand(redisClient *c) {
     config_get_string_field("bind",server.bindaddr);
     config_get_string_field("unixsocket",server.unixsocket);
     config_get_string_field("logfile",server.logfile);
-    config_get_string_field("statsd-prefix",server.statsd_prefix);
-    config_get_string_field("statsd-suffix",server.statsd_suffix);
+    config_get_string_field("statsd-prefix",server.statsd.prefix);
+    config_get_string_field("statsd-suffix",server.statsd.suffix);
 
 
     /* Numerical values */
@@ -892,7 +892,7 @@ void configGetCommand(redisClient *c) {
     config_get_bool_field("activerehashing", server.activerehashing);
     config_get_bool_field("repl-disable-tcp-nodelay",
             server.repl_disable_tcp_nodelay);
-    config_get_bool_field("statsd-enabled", server.statsd_enabled);
+    config_get_bool_field("statsd-enabled", server.statsd.enabled);
 
     /* Everything we can't handle with macros follows. */
 
@@ -1012,9 +1012,9 @@ void configGetCommand(redisClient *c) {
         char buf[256];
 
         addReplyBulkCString(c,"statsd-host");
-        if (server.statsd_host)
+        if (server.statsd.host)
             snprintf(buf,sizeof(buf),"%s %d",
-                server.statsd_host, server.statsd_port);
+                server.statsd.host, server.statsd.port);
         else
             buf[0] = '\0';
         addReplyBulkCString(c,buf);

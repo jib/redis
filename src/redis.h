@@ -98,6 +98,7 @@
 #define REDIS_REPLY_CHUNK_BYTES (16*1024) /* 16k output buffer */
 #define REDIS_INLINE_MAX_SIZE   (1024*64) /* Max size of inline reads */
 #define REDIS_MBULK_BIG_ARG     (1024*32)
+#define REDIS_MAX_STATSDBUF_LEN (1024*64) - 29 /* 64k minus ip/udp headers */
 
 /* Hash table parameters */
 #define REDIS_HT_MINFILL        10      /* Minimal hash table fill 10% */
@@ -489,6 +490,26 @@ typedef struct redisOpArray {
 } redisOpArray;
 
 /*-----------------------------------------------------------------------------
+ * External Services
+ *----------------------------------------------------------------------------*/
+
+/* This is here, rather than in statsd.h, because the statsd functions need
+   access to the redisClient definitions, and the statsd struct is stored in
+   the redisServer struct. So, catch 22 unless they're in the same file
+*/
+typedef struct redisStatsd {
+    int enabled;            /* send to statsd? */
+    char *host;             /* statsd host */
+    int port;               /* statsd port */
+    char *prefix;           /* prefix any key with this */
+    char *suffix;           /* suffix any key with this */
+    int socket;             /* open socket to the statsd daemon */
+    int max_buffer_size;    /* maximum buffer size to keep before flushing */
+    int cur_buffer_size;    /* size of the buffer so far */
+    char *buffer;           /* pending stats to send */
+} redisStatsd;
+
+/*-----------------------------------------------------------------------------
  * Global server state
  *----------------------------------------------------------------------------*/
 
@@ -665,13 +686,7 @@ struct redisServer {
     int assert_line;
     int bug_report_start; /* True if bug report header was already logged. */
     int watchdog_period;  /* Software watchdog period in ms. 0 = off */
-    /* Statsd statistics */
-    int statsd_enabled;     /* send to statsd? */
-    char *statsd_host;      /* statsd host */
-    int statsd_port;        /* statsd port */
-    char *statsd_prefix;    /* prefix any key with this */
-    char *statsd_suffix;    /* suffix any key with this */
-    int statsd_socket;      /* open socket to the statsd daemon */
+    redisStatsd statsd;   /* Statsd statistics */
 };
 
 typedef struct pubsubPattern {

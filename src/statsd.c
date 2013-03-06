@@ -47,10 +47,10 @@
 
 void statsdInit(void) {
     // close any old sockets
-    if (server.statsd_socket > 0) close(server.statsd_socket);
+    if (server.statsd.socket > 0) close(server.statsd.socket);
 
     // and open the new one
-    server.statsd_socket = statsdConnect(server.statsd_host, server.statsd_port);
+    server.statsd.socket = statsdConnect(server.statsd.host, server.statsd.port);
 }
 
 /* Connects to a statsd UDP server on host:port, returns the FD for the socket */
@@ -159,7 +159,7 @@ int _statsdSend(int fd, const char *key, const char *val) {
     // ******************************
 
     // Send the stat
-    int sent = write( server.statsd_socket, stat, len );
+    int sent = write( server.statsd.socket, stat, len );
 
     // Should we unset the socket if this happens?
     if (sent != len) {
@@ -176,7 +176,7 @@ int statsdSend(redisClient *c,long long duration) {
 
 
     // enough room to send the stat + prefixes.
-    char cmd_key[ strlen(server.statsd_prefix) + strlen(server.statsd_suffix) + 40 ];
+    char cmd_key[ strlen(server.statsd.prefix) + strlen(server.statsd.suffix) + 40 ];
     char sum_key[ sizeof(cmd_key) ];
 
     // Newer versions of statsd support multiple stats in a single packet, if they
@@ -185,7 +185,7 @@ int statsdSend(redisClient *c,long long duration) {
 
     // This is the basic key we're sending for the specific command
     snprintf(cmd_key, sizeof(cmd_key), "%sdb%d.cmd.%s%s",
-                server.statsd_prefix, c->db->id, c->cmd->name, server.statsd_suffix);
+                server.statsd.prefix, c->db->id, c->cmd->name, server.statsd.suffix);
 
 
     // This is the basic key we're sending to summarize the /type/ of commands.
@@ -200,7 +200,7 @@ int statsdSend(redisClient *c,long long duration) {
             sizeof(type));
 
     snprintf(sum_key, sizeof(sum_key), "%sdb%d.type.%s%s",
-                server.statsd_prefix, c->db->id, type, server.statsd_suffix);
+                server.statsd.prefix, c->db->id, type, server.statsd.suffix);
 
 
     /* A total of 4 stats will be sent:
@@ -215,10 +215,10 @@ int statsdSend(redisClient *c,long long duration) {
     snprintf( time, sizeof(time), ":%lld|ms", duration );
 
     int rv = 0;
-    rv += _statsdSend( server.statsd_socket, cmd_key, ":1|c" );
-    rv += _statsdSend( server.statsd_socket, cmd_key, time  );
-    rv += _statsdSend( server.statsd_socket, sum_key, ":1|c" );
-    rv += _statsdSend( server.statsd_socket, sum_key, time  );
+    rv += _statsdSend( server.statsd.socket, cmd_key, ":1|c" );
+    rv += _statsdSend( server.statsd.socket, cmd_key, time  );
+    rv += _statsdSend( server.statsd.socket, sum_key, ":1|c" );
+    rv += _statsdSend( server.statsd.socket, sum_key, time  );
 
     return rv;
 }
