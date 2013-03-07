@@ -505,8 +505,8 @@ typedef struct redisStatsd {
     char *suffix;           /* suffix any key with this */
     int socket;             /* open socket to the statsd daemon */
     int max_buffer_size;    /* maximum buffer size to keep before flushing */
-    int cur_buffer_size;    /* size of the buffer so far */
-    char *buffer;           /* pending stats to send */
+    char *cur_buffer_pos;   /* where we are in the buffer, for fast calc + avoiding strcat */
+    char buffer[REDIS_MAX_STATSDBUF_LEN];   /* pending stats to send */
 } redisStatsd;
 
 /*-----------------------------------------------------------------------------

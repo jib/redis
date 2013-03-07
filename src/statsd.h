@@ -36,4 +36,4 @@ int statsdConnect(const char *host, int port);
 int statsdSend(redisClient *c, long long duration);
 
 /* Internal functions */
-int _statsdSend(int fd, const char *key, const char *val);
+int _statsdSend(int fd, const char *stat);

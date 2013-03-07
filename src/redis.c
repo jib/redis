@@ -1212,11 +1212,10 @@ void initServerConfig() {
     statsd.prefix = zstrdup("");
     statsd.suffix = zstrdup("");
     statsd.socket = 0;
-    statsd.buffer = NULL;
-    statsd.cur_buffer_size = NULL;
-    statsd.max_buffer_size = REDIS_MAX_STATSDBUF_LEN;
+    statsd.max_buffer_size = sizeof(statsd.buffer);
+    statsd.cur_buffer_pos = statsd.buffer;
+    statsd.buffer[0] = '\0';        /* make sure the buffer is 'empty' */
     server.statsd = statsd;
-
 }
 
 /* This function will try to raise the max number of open files accordingly to

@@ -34,6 +34,7 @@
 
 #include "redis.h"
 #include "statsd.h"
+#include "limits.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -42,8 +43,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netdb.h>
-
-#define STATSD_BUF_SIZE 500
 
 void statsdInit(void) {
     // close any old sockets
@@ -119,34 +118,11 @@ int statsdConnect(const char *host, int port) {
     return sock;
 }
 
-int _statsdSend(int fd, const char *key, const char *val) {
-
-    // Enough room for the key/val plus prefix/suffix plus newline plus a null byte.
-    char stat[ strlen(key) + strlen(val) + 1 ];
-
-    strncpy( stat, key, strlen(key) + 1 );
-    strncat( stat, val, strlen(val) + 1 );
-
-    // Newer versions of statsd allow multiple metrics in a single packet, delimited
-    // by newlines. That unfortunately means that if we end our message with a new
-    // line, statsd will interpret this as an empty second metric and log a 'bad line'.
-    // This is true in at least version 0.5.0 and to avoid that, we don't send the
-    // newline. Makes debugging using nc -klu 8125 a bit more tricky, but works with
-    // modern statsds.
-    //strncat( stat, "\n",        1                       );
+int _statsdSend(int fd, const char *stat) {
 
     // ******************************
     // Sanity checks
     // ******************************
-
-    int len = strlen( stat );
-
-    // +1 for the null byte
-    if (len + 1 >= STATSD_BUF_SIZE) {
-        redisLog(REDIS_WARNING,"Statsd message length %d > max length %d - ignoring",
-                    len, STATSD_BUF_SIZE);
-        return -1;
-    }
 
     // If we didn't get a socket, don't bother trying to send
     if (fd < 1) {
@@ -159,7 +135,9 @@ int _statsdSend(int fd, const char *key, const char *val) {
     // ******************************
 
     // Send the stat
+    int len  = strlen( stat );
     int sent = write( server.statsd.socket, stat, len );
+    //int sent = len;
 
     // Should we unset the socket if this happens?
     if (sent != len) {
@@ -173,20 +151,25 @@ int _statsdSend(int fd, const char *key, const char *val) {
 }
 
 int statsdSend(redisClient *c,long long duration) {
+    /* We'll send a handful of stats in one go. To be exact, a total of 4 stats will be sent:
+     * command + increment
+     * command + duration
+     * summary + increment
+     * summary + duration
+     * It's much more efficient to group these stats together than sending them one by
+     * one. In fact, we'll batch up multiple calls worth of stats and send them when
+     * the maximum allowed buffer size is reached.
+     * Newer versions of statsd support multiple stats in a single packet, if they
+     * are separated by a newline.
+     */
 
-
-    // enough room to send the stat + prefixes.
-    char cmd_key[ strlen(server.statsd.prefix) + strlen(server.statsd.suffix) + 40 ];
-    char sum_key[ sizeof(cmd_key) ];
-
-    // Newer versions of statsd support multiple stats in a single packet, if they
-    // are separated by a newline. Should we support that here (by default) for
-    // speed, or just send multiple packets? For now, stay backwards compat.
-
-    // This is the basic key we're sending for the specific command
-    snprintf(cmd_key, sizeof(cmd_key), "%sdb%d.cmd.%s%s",
-                server.statsd.prefix, c->db->id, c->cmd->name, server.statsd.suffix);
-
+    // We'll be using this for maths & interpolation.
+    const char *prefix  = server.statsd.prefix;
+    const char *suffix  = server.statsd.suffix;
+    int plen            = strlen(prefix);
+    int slen            = strlen(suffix);
+    int db              = c->db->id;
+    const char *cmd     = c->cmd->name;
 
     // This is the basic key we're sending to summarize the /type/ of commands.
     int flags = c->cmd->flags;
@@ -199,29 +182,101 @@ int statsdSend(redisClient *c,long long duration) {
             "other"),
             sizeof(type));
 
-    snprintf(sum_key, sizeof(sum_key), "%sdb%d.type.%s%s",
-                server.statsd.prefix, c->db->id, type, server.statsd.suffix);
-
-
-    /* A total of 4 stats will be sent:
-     * command + increment
-     * command + duration
-     * summary + increment
-     * summary + duration
+    /* The total length will be the (prefix + suffix + length of the key + value) * 4
+     * The increment key is of length 4 (:1|c). The timer key is of max length 14.
+     * (:1234567890|ms), averaging 9. We also need room for dbXX.type.$command, for
+     * which I'll reserve 30 chars for now each. And then we need a newline.
      */
+    char stat[ (plen + slen + 40)*4 ];
 
-    // Get the buffer ready. 10 for the maximum lenghth of an int and +5 for metadata
-    char time[15];
-    snprintf( time, sizeof(time), ":%lld|ms", duration );
+    /* Build the 4 stats as a string - this may be faster (if more cumbersome) using
+     * strncat/strncpy */
+    snprintf( stat, sizeof(stat),
+                "%sdb%d.cmd.%s%s:1|c\n"             // increment command
+                "%sdb%d.cmd.%s%s:%lld|ms\n"         // time command
+                "%sdb%d.type.%s%s:1|c\n"            // incrememnt type of command
+                "%sdb%d.type.%s%s:%lld|ms\n",       // time type of command
+                prefix, db, cmd, suffix,            // increment command
+                prefix, db, cmd, suffix, duration,  // time command
+                prefix, db, type, suffix,           // incrememnt type of command
+                prefix, db, type, suffix, duration  // time type of command
+            );
+
+    int buf_len     = strlen(server.statsd.buffer);
+    int stat_len    = strlen(stat);
 
     int rv = 0;
-    rv += _statsdSend( server.statsd.socket, cmd_key, ":1|c" );
-    rv += _statsdSend( server.statsd.socket, cmd_key, time  );
-    rv += _statsdSend( server.statsd.socket, sum_key, ":1|c" );
-    rv += _statsdSend( server.statsd.socket, sum_key, time  );
+    // Time to flush the buffer - there's no room for more stats.
+    if (buf_len + stat_len > server.statsd.max_buffer_size) {
+        rv = _statsdSend(server.statsd.socket, server.statsd.buffer);
+        server.statsd.buffer[0] = '\0';
+    }
+
+    // Add this group of stats to the buffer.
+    strncat(server.statsd.buffer, stat, stat_len+1);
 
     return rv;
 }
+
+
+//     redisLog(REDIS_WARNING,"Cur buffer pos: %s\n", server.statsd.cur_buffer_pos);
+//
+//     server.statsd.cur_buffer_pos = mempcpy(server.statsd.cur_buffer_pos, stat, stat_len);
+//
+//     redisLog(REDIS_WARNING,"New buffer pos: %s\n", server.statsd.cur_buffer_pos);
+
+//     char stat[] =   "dev.redis.db0.cmd.TEST.vagrant-jib:1|c\n"
+//                     "dev.redis.db0.cmd.TEST.vagrant-jib:100|ms\n"
+//                     "dev.redis.db0.type.TEST.vagrant-jib:1|c\n"
+//                     "dev.redis.db0.type.TEST.vagrant-jib:100|ms\n";
+
+
+
+//     redisLog(REDIS_WARNING,"==============");
+//     //fprintf(stderr, "New stat:\n%s", stat);
+//
+//     //redisLog(REDIS_WARNING,"sizeof buffer: %d", sizeof(server.statsd.buffer));
+//     redisLog(REDIS_WARNING,"Current buffer size: %d\n", strlen(server.statsd.buffer));
+//     redisLog(REDIS_WARNING,"Max char size: %d\n", CHAR_MAX);
+//
+//     redisLog(REDIS_WARNING,"Stat size: %d\nTotal: %d\nMax: %d",
+//         strlen(stat), (strlen(server.statsd.buffer)+strlen(stat)), server.statsd.max_buffer_size);
+//
+//    // Now, does this still fit in the buffer, or should it be flushed first?
+//     int rv = 0;
+//     if ((strlen(server.statsd.buffer) + strlen(stat)) >= server.statsd.max_buffer_size) {
+//         //redisLog(REDIS_WARNING,"Flushing buffer:\n%s\n\n", server.statsd.buffer);
+//         //fprintf(stderr,"Flushing buffer:\n%s\n\n", server.statsd.buffer);
+//
+//         // Send it, flush it regardless.
+//         //rv = _statsdSend(server.statsd.socket, server.statsd.buffer);
+//         server.statsd.buffer[0] = '\0';
+//
+//         redisLog(REDIS_WARNING,"Post flush buffer size: %d\n", strlen(server.statsd.buffer));
+//     }
+//
+//
+//     char app[] = "123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789\n";
+//     char new_buf[ strlen(server.statsd.buffer) + strlen(app) + 1 ];
+//
+//     // Append to the buffer.
+//     strncat(server.statsd.buffer, stat, (strlen(stat) + 1));
+//
+//     redisLog(REDIS_WARNING,"Pre-copy buffer from struct:\n%s\n\n", server.statsd.buffer);
+//
+//     strncpy( new_buf, server.statsd.buffer, strlen(server.statsd.buffer) );
+//
+//     strncat( new_buf, app, (strlen(app) + 1));
+//
+//     server.statsd.buffer = new_buf;
+//
+//     redisLog(REDIS_WARNING,"New buffer size: %d\n", strlen(server.statsd.buffer));
+//
+//     redisLog(REDIS_WARNING,"Current buffer from char:\n%s\n\n", new_buf);
+//     redisLog(REDIS_WARNING,"Current buffer from struct:\n%s\n\n", server.statsd.buffer);
+
+//    return rv;
+
 //
 // /* Command flags. Please check the command table defined in the redis.c file
 //  * for more information about the meaning of every flag. */
